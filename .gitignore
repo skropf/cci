@@ -99,3 +99,9 @@ ENV/
 
 # mypy
 .mypy_cache/
+
+#kraken api key
+kraken.key
+
+#trader part
+src/trader.py
