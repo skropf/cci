@@ -16,8 +16,7 @@ print(currencyPairs)
 
 
 while (1):
-    for curPair in currencyPairs:
-	    for interval in intervals:
-	    	indicator = Indicator(krakenAPI, curPair=curPair, interval=interval)
-	    	indicator.start()
-	    	sleep(5)
+    for curPair, interval in zip(currencyPairs, intervals):
+    	indicator = Indicator(krakenAPI, curPair=curPair, interval=interval)
+    	indicator.start()
+    	sleep(5)
