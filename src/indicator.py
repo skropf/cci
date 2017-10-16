@@ -43,7 +43,7 @@ class Indicator(threading.Thread):
     def change_count(self, count=100):
         self._count = count
 
-    def _update_all(self, count=100):
+    def _update_all(self):
         resultDepth = self._krakenAPI.query_public('Depth', {'pair': self._curPair, 'count': self._count})['result'][self._curPair]
         resultOHLC = self._krakenAPI.query_public('OHLC', {'pair': self._curPair, 'interval': self._intervalOHLC})['result'][self._curPair]
 

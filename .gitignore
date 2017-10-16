@@ -102,6 +102,3 @@ ENV/
 
 #kraken api key
 kraken.key
-
-#trader part
-src/trader.py
