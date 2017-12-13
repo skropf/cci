@@ -7,6 +7,7 @@ import plotly as py
 import plotly.graph_objs as go
 
 
+#indicator class starts as thread
 class Indicator(threading.Thread):
 
     _currentTimeStamp = 0
@@ -26,7 +27,7 @@ class Indicator(threading.Thread):
     _dictSenkouSpanA = {}
     _dictSenkouSpanB = {}
 
-
+    #setting inital variables; tick is used as sleep in loop if used
     def __init__(self, krakenAPI, curPair="XXBTZUSD", interval=1, tick=30, pathToSaveGraph=os.environ['HOME'], group=None, target=None, name=None, args=(), kwargs=None, daemon=None):
         threading.Thread.__init__(self, group=group, target=target, name=name, args=args, kwargs=kwargs)
 
@@ -36,41 +37,54 @@ class Indicator(threading.Thread):
         self._tick = tick
         self._pathToSaveGraph = pathToSaveGraph
 
+    #interval in minutes (1,5,15,30,45,60,...)
     def change_interval(self, interval):
         self._intervalOHLC = interval
         self._clear()
 
+    #used for getting the amount of asks/bids of the order book
     def change_count(self, count=100):
         self._count = count
 
+    #update all indicators
     def _update_all(self):
+        #get order book and OHLC data
         resultDepth = self._krakenAPI.query_public('Depth', {'pair': self._curPair, 'count': self._count})['result'][self._curPair]
         resultOHLC = self._krakenAPI.query_public('OHLC', {'pair': self._curPair, 'interval': self._intervalOHLC})['result'][self._curPair]
 
+        #get server timestamp
         timestamp = int(self._krakenAPI.query_public('Time', {})['result']['unixtime'])
+
+        #update simple indicators (only 1 number)
         self._update_ap(resultDepth, timestamp)
         self._update_vwap(resultDepth, timestamp)
         self._update_gasp(resultDepth, timestamp)
 
-
+        #timestamp from ohlc data
         newTimeStampOHLC = int(resultOHLC[0][0])
 
+        #see if new data has arrived
         if newTimeStampOHLC != self._currentTimeStamp:
+            #update timestamp
             self._currentTimeStamp = newTimeStampOHLC
 
+            #update ichimoku cloud + ohlc graph
             self._update_ichimoku_kinko_hyo(resultOHLC)
             self._update_ohlc_quotes(resultOHLC)
 
+    #update average price ^= average of all order book data
     def _update_ap(self, resultDepth, timestamp):
         asks = resultDepth['asks']
         bids = resultDepth['bids']
 
         self._dictAP[timestamp] = float("{:4.8f}".format((float(asks[0][0]) + float(bids[0][0])) / 2.0))
 
+    #update volume weighted average price ^= average of all order book data prices * their respective volume set
     def _update_vwap(self, resultDepth, timestamp):
         asks = resultDepth['asks']
         bids = resultDepth['bids']
 
+        #set price list & volume list
         askSumList = [float(ask[0]) * float(ask[1]) for ask in asks]
         bidSumList = [float(bid[0]) * float(bid[1]) for bid in bids]
         askVolumeList = [float(x[1]) for x in asks]
@@ -78,7 +92,12 @@ class Indicator(threading.Thread):
 
         self._dictVWAP[timestamp] = float("{:4.8f}".format((sum(askSumList) + sum(bidSumList)) / (sum(askVolumeList) + sum(bidVolumeList))))
 
+    #update global average symmetric price
+    #it is essentially the same as the vwap only that it ignores all the data
+    #that is too much on the side (ask/bid) that is bigger
     def _update_gasp(self, resultDepth, timestamp):
+        #index 0: price
+        #index 1: volume
         asks = resultDepth['asks']
         bids = resultDepth['bids']
 
@@ -91,17 +110,17 @@ class Indicator(threading.Thread):
             askVolume = bidVolume
             bidVolumeBuffer = bidVolume
             for i in range(0, len(bids), 1):
-                bidSum = bidSum + float(bids[i][0]) * float(bids[i][1])
+                bidSum += float(bids[i][0]) * float(bids[i][1])
                 bids[i][1] = 0
 
             for i in range(0, len(asks), 1):
                 if bidVolumeBuffer - float(asks[i][1]) >= 0:
-                    bidVolumeBuffer = bidVolumeBuffer - float(asks[i][1])
-                    askSum = askSum + (float(asks[i][0]) * float(asks[i][1]))
+                    bidVolumeBuffer -= float(asks[i][1])
+                    askSum += (float(asks[i][0]) * float(asks[i][1]))
                     asks[i][1] = 0
                 else:
                     asks[i][1] = float(asks[i][1]) - bidVolumeBuffer
-                    askSum = askSum + (float(asks[i][0]) * bidVolumeBuffer)
+                    askSum += (float(asks[i][0]) * bidVolumeBuffer)
                     bidVolumeBuffer = 0
                     break;
 
@@ -109,22 +128,24 @@ class Indicator(threading.Thread):
             bidVolume = askVolume
             askVolumeBuffer = askVolume
             for i in range(0, len(asks), 1):
-                askSum = askSum + float(asks[i][0]) * float(asks[i][1])
+                askSum += float(asks[i][0]) * float(asks[i][1])
                 asks[i][1] = 0
 
             for i in range(0, len(bids), 1):
                 if askVolumeBuffer - float(bids[i][1]) >= 0:
-                    askVolumeBuffer = askVolumeBuffer - float(bids[i][1])
-                    bidSum = bidSum + (float(bids[i][0]) * float(bids[i][1]))
+                    askVolumeBuffer -= float(bids[i][1])
+                    bidSum += (float(bids[i][0]) * float(bids[i][1]))
                     bids[i][1] = 0
                 else:
                     bids[i][1] = float(bids[i][1]) - askVolumeBuffer
-                    bidSum = bidSum + (float(bids[i][0]) * askVolumeBuffer)
+                    bidSum += (float(bids[i][0]) * askVolumeBuffer)
                     askVolumeBuffer = 0
                     break;
 
         self._dictGASP[timestamp] = float("{:4.8f}".format((askSum + bidSum) / (askVolume + bidVolume)))
 
+    #update ichimoku cloud
+    #for more insight read: https://www.ichimokutrade.com/articles/Ichimoku_Ebook.pdf
     def _update_ichimoku_kinko_hyo(self, resultOHLC):
         for i in range(0, len(resultOHLC)):
             sumTenkanSen = 0.0
@@ -149,6 +170,7 @@ class Indicator(threading.Thread):
 
             self._dictChikouSpan[int(resultOHLC[i][0]) - 26 * 60 * self._intervalOHLC] = float("{:4.8f}".format(float(resultOHLC[i][4])))
 
+    #just write the ohlc data into a single dict
     def _update_ohlc_quotes(self, resultOHLC):
         self._dictQuotes['date'] = []
         self._dictQuotes['open'] = []
@@ -164,6 +186,10 @@ class Indicator(threading.Thread):
             self._dictQuotes['low'].append(float(item[3]))
             self._dictQuotes['close'].append(float(item[4]))
 
+    #clear all lists/dicts
+    #reason: had problems when running multiple threads and i got
+    #messed up graphs and data. even now it's still not working
+    #perfectly
     def _clear(self):
         self._dictOHLC.clear()
         self._dictQuotes.clear()
@@ -178,6 +204,7 @@ class Indicator(threading.Thread):
         self._dictSenkouSpanA.clear()
         self._dictSenkouSpanB.clear()
 
+    #preparing all the data for use in plotly and writing it to graph file (html)
     def _write_ichimoku_kinko_hyo(self):
         traceOHLC = go.Candlestick(x=self._dictQuotes['date'],
                 open=self._dictQuotes['open'],
@@ -187,12 +214,14 @@ class Indicator(threading.Thread):
                 increasing=dict(line=dict(color='#DBDBDB'), name='Increasing'),
                 decreasing=dict(line=dict(color='#6D6D6D'), name='Decreasing'))
 
+        #setting correct timestamp lists
         listTenkanSenTimeStamp = [datetime.utcfromtimestamp(int(timestamp)) for timestamp in list(self._dictTenkanSen.keys())]
         listKijunSenTimeStamp = [datetime.utcfromtimestamp(int(timestamp)) for timestamp in list(self._dictKijunSen.keys())]
         listChikouSpanTimeStamp = [datetime.utcfromtimestamp(int(timestamp)) for timestamp in list(self._dictChikouSpan.keys())]
         listSenkouSpanATimeStamp = [datetime.utcfromtimestamp(int(timestamp)) for timestamp in list(self._dictSenkouSpanA.keys())]
         listSenkouSpanBTimeStamp = [datetime.utcfromtimestamp(int(timestamp)) for timestamp in list(self._dictSenkouSpanB.keys())]
 
+        #creating the 5 ichimoku cloud trend lines
         traceTenkanSen = go.Scatter(x=listTenkanSenTimeStamp,
                                     y=list(self._dictTenkanSen.values()),
                                     mode='lines',
@@ -219,24 +248,28 @@ class Indicator(threading.Thread):
                                       line=dict(color='#AB00FF'),
                                       name='Senkou Span B')
 
+        #set data for graph
         data = [traceOHLC, traceTenkanSen, traceKijunSen, traceChikouSpan, traceSenkouSpanA, traceSenkouSpanB]
 
+        #setting necessary vars
         path = self._pathToSaveGraph + '/indicator/ichimoku-kinko-hyo/' + str(self._intervalOHLC) + 'min/'
         file = path + self._curPair + '.html'
-
         layout = go.Layout(title=self._curPair + ": AP:" + str(list(self._dictAP.values())[0]) + " VWAP:" + str(list(self._dictVWAP.values())[0]) + " GASP:" + str(list(self._dictGASP.values())[0]))
 
         fig = go.Figure(data=data, layout=layout)
 
+        #creating graph
         graph = py.offline.plot(fig, filename=file, output_type='div')
 
         if not os.path.exists(path): os.makedirs(path)
 
+        #write graph and be happy
         file = open(file, "w")
         file.flush()
         file.write(str(graph))
         file.close()
 
+    #run indicator
     def run(self):
         print(self._curPair + "-Indicator running: Tick: " + str(self._tick) + "s - Interval: " + str(self._intervalOHLC) + "min")
 
