@@ -95,6 +95,7 @@ class Indicator(threading.Thread):
     #update global average symmetric price
     #it is essentially the same as the vwap only that it ignores all the data
     #that is too much on the side (ask/bid) that is bigger
+    #TODO: simplyfy code
     def _update_gasp(self, resultDepth, timestamp):
         #index 0: price
         #index 1: volume
